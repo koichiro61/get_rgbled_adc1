@@ -1,4 +1,4 @@
-#define SKETCH_DESC "TEST get board name, GPIO_NUM of RGBLED and ADC1"
+#define SKETCH_DESC "TEST get board name, GPIO_NUM of RGBLED and ADC1, active/inactive timer, and blinker_timer"
 #define VERSION "20250629"
 #include "M5Unified.h"
 #include "EspEasyLED.h"
@@ -52,17 +52,89 @@ gpio_num_t get_gpio_num_adc1(m5::board_t board) {
   return (gpio_num_t) pin_table[i][1];
 }
 
+EspEasyLED* rgbled;
+
+struct interval_timer_param {
+  uint16_t interval;      // median interval (sec)
+  uint16_t fluc_interval; // flluction of inverval (sec) 
+  uint16_t inactive_dur;  // duration of inactive time (sec)
+  uint16_t fluc_inactive;  // fluctuation of inactive duration (sec) 
+} timer_param;
+
+struct blinker_timer_param {
+  uint16_t dur_on;  // in millisec
+  uint16_t dur_off; // in millisec
+} blinker_param;
+
+volatile bool operation_active = true;
+volatile bool blinker_on = true;
+
+void blinker_timer(void *arg) {
+  blinker_timer_param* timer_param = (blinker_timer_param*) arg;
+  uint16_t dur_on = timer_param->dur_on;
+  uint16_t dur_off = timer_param->dur_off;
+
+  uint32_t start_time_msec;
+
+  while(1) {
+    blinker_on = true;
+    start_time_msec = millis();
+    while (millis() < start_time_msec + dur_on) {
+      vTaskDelay(10);
+    }
+    blinker_on = false;
+    start_time_msec = millis();
+    while (millis() < start_time_msec + dur_off) {
+      vTaskDelay(10);
+    }
+  }
+}
+
+void interval_timer(void *arg) {
+  interval_timer_param* timer_param = (interval_timer_param*)arg;
+  uint16_t interval = timer_param->interval;  // all parameters in sec
+  uint16_t fluc_interval = timer_param->fluc_interval;
+  uint16_t inactive_dur = timer_param->inactive_dur;
+  uint16_t fluc_inactive = timer_param->fluc_inactive;
+  uint16_t temp_interval, temp_inactive_dur, temp_fluc, temp_min, temp_max;
+  
+  uint32_t start_time_msec;
+
+  while(1) {
+    operation_active = true;
+    temp_fluc = random(fluc_interval);
+    temp_min = max(0, interval - temp_fluc);
+    temp_max = interval + temp_fluc;
+    temp_interval = random(temp_min, temp_max);
+    temp_fluc = random(fluc_inactive);
+    temp_min = max(0, inactive_dur - temp_fluc);
+    temp_max = inactive_dur + temp_fluc;
+    temp_inactive_dur = random(temp_min, temp_max);
+
+    start_time_msec = millis();
+    operation_active = true;
+    while (millis() < start_time_msec + temp_interval * 1000) {
+      vTaskDelay(1000);
+    }
+    // interval period expired and now move to inactive mode
+    start_time_msec = millis();
+    operation_active = false;
+    while (millis() < start_time_msec + temp_inactive_dur * 1000) {
+      vTaskDelay(1000);
+    }
+  }
+}
 
 void setup() {
   m5::board_t board;
   String board_name;
-  gpio_num_t gpio_num_rgbled;
-  gpio_num_t gpio_num_adc1;
+  gpio_num_t gpio_num_rgbled, gpio_num_adc1;
 
   auto cfg = M5.config();
   M5.begin(cfg);
   Serial.begin(115200);
   delay(2000);
+
   Serial.println(SKETCH_DESC);
   Serial.println(VERSION);
 
@@ -72,8 +144,30 @@ void setup() {
   gpio_num_adc1 = get_gpio_num_adc1(board);
   Serial.printf("Board %s, RGBLED GPIO:%d, ADC1 GPIO:%d\n",\
     board_name, gpio_num_rgbled, gpio_num_adc1);
+
+  randomSeed(analogRead(gpio_num_adc1));
+
+  timer_param = {10, 3, 5, 2};
+  xTaskCreatePinnedToCore(interval_timer, "interval_timer", 4096,\
+    (void*)&timer_param, 1, NULL, tskNO_AFFINITY);
+
+  blinker_param = {250, 250};
+  xTaskCreatePinnedToCore(blinker_timer, "blinker_timer", 4096,\
+    (void*)&blinker_param, 1, NULL, tskNO_AFFINITY);
+
+  pinMode(gpio_num_rgbled, OUTPUT);
+  rgbled = new EspEasyLED(gpio_num_rgbled,1,20);
 }
 
 void loop() {
+  if (operation_active) {
+    rgbled->showColor(EspEasyLEDColor::BLUE);
+  } else {
+    if (blinker_on) {
+      rgbled->showColor(EspEasyLEDColor::BLUE);
+    } else {
+      rgbled->showColor(EspEasyLEDColor::BLACK);
+    }
+  }  
+  delay(10);
 }
-
