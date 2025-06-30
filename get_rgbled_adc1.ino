@@ -90,33 +90,29 @@ void blinker_timer(void *arg) {
   }
 }
 
+uint16_t get_random_number(uint16_t median, uint16_t fluctuation) {
+  return random(max(0, median - fluctuation), median + fluctuation);
+}
+
 void interval_timer(void *arg) {
   interval_timer_param* timer_param = (interval_timer_param*)arg;
-  uint16_t interval = timer_param->interval;  // all parameters in sec
+  uint16_t median_interval = timer_param->interval;  // all parameters in sec
   uint16_t fluc_interval = timer_param->fluc_interval;
-  uint16_t inactive_dur = timer_param->inactive_dur;
-  uint16_t fluc_inactive = timer_param->fluc_inactive;
-  uint16_t temp_interval, temp_inactive_dur, temp_fluc, temp_min, temp_max;
-  
+  uint16_t median_inactive_dur = timer_param->inactive_dur;
+  uint16_t fluc_inactive_dur = timer_param->fluc_inactive;
+
   uint32_t start_time_msec;
 
   while(1) {
-    operation_active = true;
-    temp_fluc = random(fluc_interval);
-    temp_min = max(0, interval - temp_fluc);
-    temp_max = interval + temp_fluc;
-    temp_interval = random(temp_min, temp_max);
-    temp_fluc = random(fluc_inactive);
-    temp_min = max(0, inactive_dur - temp_fluc);
-    temp_max = inactive_dur + temp_fluc;
-    temp_inactive_dur = random(temp_min, temp_max);
+    uint16_t temp_interval = get_random_number(median_interval, fluc_interval);
+    uint16_t temp_inactive_dur = get_random_number(median_inactive_dur, fluc_inactive_dur);
 
     start_time_msec = millis();
     operation_active = true;
     while (millis() < start_time_msec + temp_interval * 1000) {
       vTaskDelay(1000);
     }
-    // interval period expired and now move to inactive mode
+    // now, interval period expired and move to inactive mode
     start_time_msec = millis();
     operation_active = false;
     while (millis() < start_time_msec + temp_inactive_dur * 1000) {
